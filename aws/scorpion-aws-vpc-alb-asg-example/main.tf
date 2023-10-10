@@ -67,6 +67,10 @@ resource "aws_eip" "nat_eip1" {
 resource "aws_nat_gateway" "Scorpion-NATGateway-1a" {
   allocation_id = aws_eip.nat_eip1.id
   subnet_id     = aws_subnet.public_subnet1.id
+
+  # To ensure proper ordering, it is recommended to add an explicit dependency
+  # on the Internet Gateway for the VPC.
+  depends_on = [aws_internet_gateway.Scorpion-IGW]
 }
 
 resource "aws_eip" "nat_eip2" {
@@ -152,6 +156,31 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
+resource "aws_security_group" "ec2_sg" {
+  name        = "Scorpion-EC2SSHSecurityGroup"
+  description = "Allow SSH inbound traffic"
+  vpc_id      = aws_vpc.Scorpion-VPC.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # This allows SSH from anywhere. Consider restricting this.
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"] # This allows all outbound traffic.
+  }
+
+  tags = {
+    Name = "Scorpion-EC2SSHSecurityGroup"
+  }
+}
+
+
 resource "aws_security_group" "asg_sg" {
   name        = "Scorpion-ASGSecurityGroup"
   description = "Allow inbound traffic from the ALB and necessary outbound traffic"
@@ -196,7 +225,7 @@ resource "aws_iam_instance_profile" "ec2_instance_profile" {
 
 resource "aws_iam_role_policy_attachment" "ec2_ssm_attach" {
   role       = aws_iam_role.ec2_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess" # This is just an example. Adjust the policy based on your needs.
+  policy_arn = "arn:aws:iam::aws:policy/EC2InstanceConnect" # This is just an example. Adjust the policy based on your needs.
 }
 
 # Application Load Balancer and related resources
@@ -204,7 +233,7 @@ resource "aws_lb" "Scorpion-ALB" {
   name               = "Scorpion-ALB"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
+  security_groups    = [aws_security_group.alb_sg.id, aws_security_group.ec2_sg.id]
   subnets            = [aws_subnet.public_subnet1.id, aws_subnet.public_subnet2.id]
   enable_deletion_protection = false
   tags = {
